@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+
+# Initialize script should be run once at first boot of instance
+#  - Manage data dir
+#    - Mount volume 
+#    - Create directories
+#  - Configure evmosd
+#  - Enable systemd services
+
+set -euxo pipefail
+
+EVMOS_HOME_PATH={{ evmos_home_path }}
+CHAIN_ID={{ chain_id }}
+USER={{ user }}
+GROUP={{ group }}
+PEERS={{ peers }}
+SNAP_RPC1={{ snap_rpc1 }}
+SNAP_RPC2={{ snap_rpc2 }}
+
+ensure_sudo_privileges() {
+    local prompt
+
+    prompt=$(sudo -nv 2>&1)
+    if [ $? -eq 0 ]; then
+        ## all good can run script 
+        true
+    elif echo $prompt | grep -q '^sudo:'; then
+        ## all good can run script 
+        true
+    else
+        ## no good. Can't run script
+        echo "script must be executed by user with sudo privileges"
+        exit 1
+    fi
+}
+
+
+update_peers() {
+    echo "--- updating persistent_peers with provided peers"
+    PEERS=$PEERS
+    sed -i.bak -e "s/^persistent_peers *=.*/persistent_peers = \"$PEERS\"/" $EVMOS_HOME_PATH/config/config.toml
+}
+
+update_node_id_key() {
+    echo "--- Creating new node id and node key"
+    DIR=$(mktemp -d)
+    $EVMOS_HOME_PATH/bin/evmosd init test --home $DIR --chain-id $CHAIN_ID
+    cp $DIR/config/node_key.json $EVMOS_HOME_PATH/config/node_key.json
+    cp $DIR/config/priv_validator_key.json $EVMOS_HOME_PATH/config/priv_validator_key.json
+    sudo chown -R $USER:$GROUP $EVMOS_HOME_PATH/config
+    rm -rf $DIR
+}
+
+update_public_ip() {
+    EXTERNAL_IP=$(curl -H "Metadata-Flavor: Google" http://169.254.169.254/computeMetadata/v1/instance/network-interfaces/0/access-configs/0/external-ip)
+    echo "--- Updating external address with instance public ip ${EXTERNAL_IP}"
+    sed -i.bak -e "s/^external_address *=.*/external_address = \"$EXTERNAL_IP:26656\"/" $EVMOS_HOME_PATH/config/config.toml
+}
+
+update_moniker() {
+    INSTANCE_NAME=$(curl -H "Metadata-Flavor: Google" "http://169.254.169.254/computeMetadata/v1/instance/name")
+    echo "--- updating moniker with instace name ${INSTANCE_NAME}"
+    sed -i.bak -e "s/^moniker *=.*/moniker = \"$INSTANCE_NAME\"/" $EVMOS_HOME_PATH/config/config.toml
+}
+
+update_indexer() {
+    sed -i -e "s%^indexer *=.*%indexer = \"null\"%; " $EVMOS_HOME_PATH/config/config.toml
+}
+
+update_state_sync_config() {
+    LATEST_HEIGHT=$(curl -s $SNAP_RPC1/block | jq -r .result.block.header.height); \
+    BLOCK_HEIGHT=$((LATEST_HEIGHT - 2000)); \
+    TRUST_HASH=$(curl -s "$SNAP_RPC1/block?height=$BLOCK_HEIGHT" | jq -r .result.block_id.hash)
+    sed -i.bak -E "s|^(enable[[:space:]]+=[[:space:]]+).*$|\1true| ; \
+    s|^(rpc_servers[[:space:]]+=[[:space:]]+).*$|\1\"$SNAP_RPC1,$SNAP_RPC2\"| ; \
+    s|^(trust_height[[:space:]]+=[[:space:]]+).*$|\1$BLOCK_HEIGHT| ; \
+    s|^(trust_hash[[:space:]]+=[[:space:]]+).*$|\1\"$TRUST_HASH\"| ; \
+    s|^(seeds[[:space:]]+=[[:space:]]+).*$|\1\"\"|" $EVMOS_HOME_PATH/config/config.toml
+    cat << EOF > $EVMOS_HOME_PATH/data/priv_validator_state.json
+    {}
+EOF
+    
+}
+
+turn_off_state_sync() {
+    sed -i.bak -E "s|^(enable[[:space:]]+=[[:space:]]+).*$|\1false|" $EVMOS_HOME_PATH/config/config.toml
+}
+
+configure_evmos() {
+    update_peers
+    update_node_id_key
+    update_public_ip
+    update_moniker
+    update_indexer
+    update_state_sync_config
+}
+
+
+mount_data_disk_if_exists() {
+    local DATA_DISK_DEVICE_NAME
+    
+    DATA_DISK_DEVICE_NAME=$(basename "$(ls -l /dev/disk/by-id | grep google-evmos_data_disk | head -n 1)")
+    if [ -n "${DATA_DISK_DEVICE_NAME}" ]; then
+        local fileCmdOut
+        fileCmdOut=$(sudo file -s /dev/${DATA_DISK_DEVICE_NAME})
+        if [[ ! $fileCmdOut =~ .*"data".* ]]; then
+            echo "Volume is empty. Formatting"
+            sudo mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,discard /dev/${DATA_DISK_DEVICE_NAME}
+        fi
+        sudo mount -o discard,defaults /dev/${DATA_DISK_DEVICE_NAME} $EVMOS_HOME_PATH/data
+        sudo chown -R $USER:$GROUP $EVMOS_HOME_PATH/data
+        sudo chmod a+w $EVMOS_HOME_PATH/data
+        
+        local fileSystemUUID
+        fileSystemUUID=$(lsblk -no UUID /dev/${DATA_DISK_DEVICE_NAME})
+        if ! grep -q ${fileSystemUUID} /etc/fstab ; then
+            echo "adding entry to fstab to mount ${DATA_DISK_DEVICE_NAME} on reboot"
+            echo '# init-evmos_data_disk' | sudo tee -a /etc/fstab
+            echo "UUID=$fileSystemUUID    $EVMOS_HOME_PATH/data    ext4    discard,defaults,nofail    0    2" | sudo tee -a /etc/fstab
+        fi
+    fi
+}
+
+
+enable_systemd_services() {
+    # Enable evmosd service
+    sudo systemctl enable evmosd
+    sudo systemctl daemon-reload
+}
+
+start_services() {
+    sudo systemctl start evmosd
+}
+
+ensure_sudo_privileges
+configure_evmos
+mount_data_disk_if_exists
+enable_systemd_services
+start_services
+sleep 60s
+turn_off_state_sync

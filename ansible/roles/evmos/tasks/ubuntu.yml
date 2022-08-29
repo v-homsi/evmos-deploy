@@ -1,0 +1,83 @@
+---
+- name: Gather variables for each processor architecture
+  include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_architecture | lower }}.yml"
+
+- name: Create directories for setup
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ user }}"
+    group: "{{ group }}"
+  with_items:
+    - "{{ evmos_home_path }}/bin"
+    - "{{ evmos_home_path }}/config"
+    - "{{ evmos_home_path }}/data"
+    - "{{ evmos_home_path }}/scripts"
+
+- name: Add bin dir to system-wide $PATH.
+  copy:
+    dest: /etc/profile.d/custom-path.sh
+    content: "PATH=$PATH:{{ evmos_home_path }}/bin"
+
+- name: Download binary from github
+  block:
+    - name: create new directory for binary
+      file:
+        path: "{{ evmos_home_path }}/release_binary/{{ tag }}"
+        state: directory
+        owner: "{{ user }}"
+        group: "{{ group }}"
+    - name: Unarchive Evmos Release file from github releases
+      unarchive:
+        src: "https://github.com/evmos/evmos/releases/download/v{{ tag }}/evmos_{{ tag }}_Linux_{{ arch }}.tar.gz"
+        dest: "{{ evmos_home_path }}/release_binary/{{ tag }}"
+        remote_src: yes
+        creates: "{{ evmos_home_path }}/release_binary/{{ tag }}/bin/evmosd"
+    - name: copy binary to PATH bin
+      copy:
+        src: "{{ evmos_home_path }}/release_binary/{{ tag }}/bin/evmosd"
+        dest: "{{ evmos_home_path }}/bin/evmosd"
+        owner: "{{ user }}"
+        group: "{{ group }}"
+        mode: "755"
+        remote_src: yes
+        force: yes
+
+- name: Download genesis file from evmos archive
+  block:
+    - get_url:
+        url: "{{ genesis_url }}"
+        dest: "{{ evmos_home_path }}/config/genesis.json"
+        mode: "0755"
+        group: "{{ user }}"
+        owner: "{{ group }}"
+
+- name: Create evmosd service file
+  template:
+    src: evmosd.service.j2
+    dest: /etc/systemd/system/evmosd.service
+    mode: "644"
+
+- meta: flush_handlers
+
+- name: Configure evmosd config
+  template:
+    src: "{{ item }}.j2"
+    dest: "{{ evmos_home_path }}/config/{{ item }}"
+    owner: "{{ user }}"
+    group: "{{ group }}"
+  with_items:
+    - config.toml
+    - app.toml
+
+- name: Copy evmos scripts
+  template:
+    src: "{{ item }}.j2"
+    dest: "{{ evmos_home_path }}/scripts/{{ item }}"
+    owner: "{{ user }}"
+    group: "{{ group }}"
+    mode: "744"
+  with_items:
+    - initialize.sh

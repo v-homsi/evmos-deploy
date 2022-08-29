@@ -1,0 +1,57 @@
+---
+- name: "Updating the operating system."
+  apt:
+    force_apt_get: true
+    name: "*"
+    state: latest
+    update_cache: "yes"
+- name: "Installing additional packages."
+  apt:
+    name:
+      - curl
+      - wget
+      - git
+      - net-tools
+      - unzip
+      - ca-certificates
+      - jq
+    state: latest
+
+- name: Make sure we have a 'wheel' group
+  group:
+    name: wheel
+    state: present
+
+- name: Allow 'wheel' group to have passwordless sudo
+  lineinfile:
+    path: /etc/sudoers
+    state: present
+    regexp: "^%wheel"
+    line: "%wheel ALL=(ALL) NOPASSWD: ALL"
+    validate: "/usr/sbin/visudo -cf %s"
+
+- name: Create a new regular user with sudo privileges
+  user:
+    name: "{{ user }}"
+    state: present
+    groups: wheel,adm
+    append: true
+    create_home: true
+    shell: /bin/bash
+
+- name: Enable syslog
+  lineinfile:
+    path: /etc/rsyslog.conf
+    regex: '^#\s*{{ item.regex }}(.*)$'
+    line: "{{ item.line }}"
+  loop:
+    - regex: 'module\(load="imtcp"\)'
+      line: 'module(load="imtcp")'
+    - regex: 'input\(type="imtcp" port="514"\)'
+      line: 'input(type="imtcp" port="514")'
+
+- name: cron.hourly logrotate
+  copy:
+    src: "{{ role_path }}/files/logrotate"
+    dest: /etc/cron.hourly/logrotate
+    mode: "751"
