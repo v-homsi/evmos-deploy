@@ -12,12 +12,14 @@
     min_gas_prices: "10000"
     mempool_size: 5000
     api_namespaces: eth,net,web3,txpool
-    tag: 7.0.0
+    tag: 8.1.0
     snap_rpc1: "http://bd-evmos-testnet-state-sync-node-01.bdnodes.net:26657"
     snap_rpc2: "http://bd-evmos-testnet-state-sync-node-02.bdnodes.net:26657"
     chain_id: "evmos_9000-4"
     peers: "3a6b22e1569d9f85e9e97d1d204a1c457d860926@bd-evmos-testnet-seed-node-01.bdnodes.net:26656"
     genesis_url: "https://archive.evmos.dev/evmos_9000-4/genesis.json"
+    node_exporter_version: 1.3.1
   roles:
     - base
     - evmos
+    - node-exporter

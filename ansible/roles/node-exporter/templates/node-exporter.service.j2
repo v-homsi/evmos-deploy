@@ -1,0 +1,19 @@
+[Unit]
+Description=Node Exporter
+ConditionPathExists={{ evmos_home_path }}/bin/node_exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User={{ user }}
+Group={{ group }}
+LimitNOFILE=1024
+
+Restart=on-failure
+RestartSec=10
+
+ExecStart={{ evmos_home_path }}/bin/node_exporter
+
+[Install]
+WantedBy=multi-user.target

@@ -50,3 +50,5 @@ artifacts/*.vmdk
 ## Ignore manifests directory.
 manifests/*.json
 
+
+builds/common.pkrvars.hcl

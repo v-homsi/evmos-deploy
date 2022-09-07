@@ -1,0 +1,45 @@
+---
+- name: Gather variables for each processor architecture
+  include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_architecture | lower }}.yml"
+- name: Create directories for setup
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ user }}"
+    group: "{{ group }}"
+  with_items:
+    - "{{ evmos_home_path }}/bin"
+- name: Unarchive Node exporter from github
+  unarchive:
+    src: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version }}/node_exporter-{{ node_exporter_version }}.linux-{{ arch }}.tar.gz"
+    dest: "{{ evmos_home_path }}"
+    remote_src: yes
+    creates: "{{ evmos_home_path }}/node_exporter-{{ node_exporter_version }}.linux-{{ arch }}/node_exporter"
+- name: Copy node_exporter binary to remote host
+  copy:
+    src: "{{ evmos_home_path }}/node_exporter-{{ node_exporter_version }}.linux-{{ arch }}/node_exporter"
+    dest: "{{ evmos_home_path }}/bin/node_exporter"
+    owner: "{{ user }}"
+    group: "{{ group }}"
+    mode: "755"
+    remote_src: yes
+    force: yes
+- name: Create node-exporter service file
+  template:
+    src: node-exporter.service.j2
+    dest: /etc/systemd/system/node-exporter.service
+    mode: "644"
+  notify: Reload systemd
+- meta: flush_handlers
+- name: Enable service node-exporter and ensure it is not masked
+  systemd:
+    name: node-exporter
+    enabled: yes
+    masked: no
+- name: Start node-exporter
+  systemd:
+    state: restarted
+    daemon_reload: yes
+    name: node-exporter

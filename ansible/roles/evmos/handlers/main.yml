@@ -2,3 +2,7 @@
 - name: Reload systemd
   systemd:
     daemon_reload: yes
+- name: Restart logging service
+  systemd:
+    state: restarted
+    name: rsyslog

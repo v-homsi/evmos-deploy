@@ -81,3 +81,31 @@
     mode: "744"
   with_items:
     - initialize.sh
+
+- name: Logging configuration
+  template:
+    src: 30-evmosd.conf.j2
+    dest: /etc/rsyslog.d/30-evmosd.conf
+    owner: "{{ user }}"
+    group: "{{ group }}"
+    mode: u=rw,g=r,o=r
+  notify: Restart logging service
+- meta: flush_handlers
+
+- name: Logging rotation configuration
+  template:
+    src: evmosd.logrotate.j2
+    dest: /etc/logrotate.d/evmosd
+    owner: root
+    group: root
+    mode: u=rw,g=r,o=r
+  notify: Restart logging service
+- meta: flush_handlers
+
+- name: frequent logrotate cronjob
+  cron:
+    name: "evmosd logrotate"
+    minute: "{{ minute | default('*/60', true) }}"
+    user: "root"
+    state: present
+    job: "logrotate -f /etc/logrotate.d/evmosd"
